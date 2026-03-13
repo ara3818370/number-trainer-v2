@@ -1,7 +1,7 @@
 // sw.js — Service Worker: Cache First with Network Fallback
-// v2: Updated cache with new modules
+// v2b: Added i18n and numbers-de modules
 
-const CACHE_VERSION = 'nlt-v2';
+const CACHE_VERSION = 'nlt-v2b';
 const ASSETS = [
   './',
   './index.html',
@@ -12,6 +12,8 @@ const ASSETS = [
   './js/game.js',
   './js/categories.js',
   './js/numbers-en.js',
+  './js/numbers-de.js',
+  './js/i18n.js',
   './js/sentences.js',
   './js/ui.js',
   './js/storage.js',
