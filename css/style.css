@@ -571,6 +571,62 @@ button:disabled {
   transform: translateY(0);
 }
 
+/* ── Language switchers ────────────────────────────────────────────────── */
+
+.lang-switchers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.lang-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lang-label {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+.lang-buttons {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.lang-btn {
+  flex: 1;
+  padding: 8px 4px;
+  min-height: 40px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.lang-btn.active {
+  background: var(--color-speed-active);
+  color: var(--color-speed-text);
+  border-color: var(--color-speed-active);
+}
+
+.lang-btn:active {
+  transform: scale(0.97);
+}
+
 /* ── Menu extras ──────────────────────────────────────────────────────── */
 
 .menu-header {
