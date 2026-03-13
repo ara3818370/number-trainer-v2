@@ -1,73 +1,135 @@
-// confuser.js — Confuser generation v2
-// New algorithm: category-specific confusers with last-digit constraint
+// confuser.js — Confuser generation v2b
+// Language-aware: uses the same language-dispatching functions from categories.js
 // At least 2 of 4 options (target + 3 confusers) must share the same last digit
 
 import {
-  cardinalToWords, ordinalToWords, ordinalSuffix, yearToWords,
-  decadeToWords, fractionToWords, decimalToWords, currencyToWords,
-  percentageToWords, roomBusToWords, scoreToWords, temperatureToWords,
-  largeNumberToWords
+  cardinalToWords as enCardinal, ordinalToWords as enOrdinal, ordinalSuffix as enOrdinalSuffix,
+  yearToWords as enYear, decadeToWords as enDecade, fractionToWords as enFraction,
+  decimalToWords as enDecimal, currencyToWords as enCurrency,
+  percentageToWords as enPercentage, roomBusToWords as enRoomBus,
+  scoreToWords as enScore, temperatureToWords as enTemperature,
+  largeNumberToWords as enLarge
 } from './numbers-en.js';
+
+import {
+  cardinalToWords as deCardinal, ordinalToWords as deOrdinal, ordinalSuffix as deOrdinalSuffix,
+  yearToWords as deYear, decadeToWords as deDecade, fractionToWords as deFraction,
+  decimalToWords as deDecimal, currencyToWords as deCurrency,
+  percentageToWords as dePercentage, roomBusToWords as deRoomBus,
+  scoreToWords as deScore, temperatureToWords as deTemperature,
+  largeNumberToWords as deLarge
+} from './numbers-de.js';
+
+import { getLearnLang } from './i18n.js';
+
+// ── Language-dispatched helpers ────────────────────────────────────────────
+
+/** @returns {'en'|'de'} */
+function lang() { return getLearnLang(); }
+
+function cardinalToWords(n) { return lang() === 'de' ? deCardinal(n) : enCardinal(n); }
+function ordinalToWords(n) { return lang() === 'de' ? deOrdinal(n) : enOrdinal(n); }
+function ordinalSuffix(n) { return lang() === 'de' ? deOrdinalSuffix(n) : enOrdinalSuffix(n); }
+function yearToWords(y) { return lang() === 'de' ? deYear(y) : enYear(y); }
+function decadeToWords(d, q) { return lang() === 'de' ? deDecade(d, q) : enDecade(d, q); }
+function fractionToWords(w, n, d) { return lang() === 'de' ? deFraction(w, n, d) : enFraction(w, n, d); }
+function decimalToWords(n) { return lang() === 'de' ? deDecimal(n) : enDecimal(n); }
+function currencyToWords(a) { return lang() === 'de' ? deCurrency(a) : enCurrency(a); }
+function percentageToWords(n) { return lang() === 'de' ? dePercentage(n) : enPercentage(n); }
+function roomBusToWords(t, n) { return lang() === 'de' ? deRoomBus(t, n) : enRoomBus(t, n); }
+function scoreToWords(h, a) { return lang() === 'de' ? deScore(h, a) : enScore(h, a); }
+function temperatureToWords(t) { return lang() === 'de' ? deTemperature(t) : enTemperature(t); }
+function largeNumberToWords(n) { return lang() === 'de' ? deLarge(n) : enLarge(n); }
+
+// ── Display helpers for language-specific formatting ───────────────────────
+
+/**
+ * Format decimal display based on learning language.
+ * @param {number} v
+ * @returns {string}
+ */
+function formatDecimalDisplay(v) {
+  const s = v.toFixed(2);
+  return lang() === 'de' ? s.replace('.', ',') : s;
+}
+
+/**
+ * Format currency display based on learning language.
+ * @param {number} v
+ * @returns {string}
+ */
+function formatCurrencyDisplay(v) {
+  return lang() === 'de' ? '€' + v.toFixed(2).replace('.', ',') : '$' + v.toFixed(2);
+}
+
+/**
+ * Format percentage display based on learning language.
+ * @param {number} v
+ * @param {boolean} isWhole
+ * @returns {string}
+ */
+function formatPercentageDisplay(v, isWhole) {
+  if (isWhole) return v + '%';
+  const formatted = v.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return lang() === 'de' ? formatted.replace('.', ',') + '%' : formatted + '%';
+}
+
+/**
+ * Format large number display based on learning language.
+ * @param {number} v
+ * @returns {string}
+ */
+function formatLargeDisplay(v) {
+  return lang() === 'de' ? v.toLocaleString('de-DE') : v.toLocaleString('en-US').replace(/,/g, '\u2009');
+}
+
+/**
+ * Room/bus display label.
+ * @param {string} type
+ * @returns {string}
+ */
+function roomLabel(type) {
+  if (lang() === 'de') return type === 'room' ? 'Raum' : 'Bus';
+  return type === 'room' ? 'Room' : 'Bus';
+}
+
+/**
+ * Decade display based on learning language.
+ * @param {number} decade
+ * @param {string} qualifier
+ * @returns {string}
+ */
+function formatDecadeDisplay(decade, qualifier) {
+  if (lang() === 'de') {
+    const qualMap = { early: 'frühen', mid: 'mittleren', late: 'späten' };
+    const decNames = { 50: 'Fünfziger', 60: 'Sechziger', 70: 'Siebziger', 80: 'Achtziger', 90: 'Neunziger' };
+    return 'die ' + (qualMap[qualifier] || qualifier) + ' ' + (decNames[decade] || decade + 'er');
+  }
+  return 'the ' + qualifier + ' ' + decade + 's';
+}
 
 // ── Random helpers ─────────────────────────────────────────────────────────
 
-/**
- * Random integer in [min, max] inclusive.
- * @param {number} min
- * @param {number} max
- * @returns {number}
- */
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-/**
- * Pick a random element from an array.
- * @param {Array} arr
- * @returns {*}
- */
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
 // ── Display equality check ─────────────────────────────────────────────────
 
-/**
- * Check if two CategoryValues have the same display string.
- * @param {object} a
- * @param {object} b
- * @returns {boolean}
- */
-function sameDisplay(a, b) {
-  return a.display === b.display;
-}
-
-/**
- * Check if candidate display is unique among existing values.
- * @param {object} candidate
- * @param {object[]} existing
- * @returns {boolean}
- */
 function isUnique(candidate, existing) {
   return !existing.some(e => e.display === candidate.display);
 }
 
 // ── Cardinal confusers ─────────────────────────────────────────────────────
 
-/**
- * Generate confuser candidates for cardinal numbers.
- * @param {object} target
- * @returns {object[]}
- */
 function cardinalConfusers(target) {
   const n = target.value;
   const candidates = [];
 
-  /**
-   * Build a cardinal CategoryValue from a number.
-   * @param {number} v
-   * @returns {object}
-   */
   const build = (v) => ({
     value: v,
     display: String(v),
@@ -76,26 +138,34 @@ function cardinalConfusers(target) {
     category: 'cardinals',
   });
 
-  // Teen/ty swap
   const lastTwo = n % 100;
-  if (lastTwo >= 13 && lastTwo <= 19) {
-    candidates.push(build((lastTwo % 10) * 10));
-  }
-  if (lastTwo >= 20 && lastTwo <= 90 && lastTwo % 10 === 0) {
-    candidates.push(build((lastTwo / 10) + 10));
-  }
+  if (lastTwo >= 13 && lastTwo <= 19) candidates.push(build((lastTwo % 10) * 10));
+  if (lastTwo >= 20 && lastTwo <= 90 && lastTwo % 10 === 0) candidates.push(build((lastTwo / 10) + 10));
 
-  // 8/9 swap
   const digits = String(n).split('');
   for (let i = 0; i < digits.length; i++) {
     if (digits[i] === '8') { const c = [...digits]; c[i] = '9'; candidates.push(build(Number(c.join('')))); }
     if (digits[i] === '9') { const c = [...digits]; c[i] = '8'; candidates.push(build(Number(c.join('')))); }
   }
 
-  // Small deltas: ±1, ±2, ±10
   for (const d of [-1, 1, -2, 2, -10, 10]) {
     const v = n + d;
     if (v >= 1 && v <= 200) candidates.push(build(v));
+  }
+
+  // FIX MAJOR-4: German digit-swap confusers for 21-99
+  // German inverts units/tens (einundzwanzig = 21), so 24 and 42
+  // sound very similar (vierundzwanzig vs zweiundvierzig).
+  if (lang() === 'de') {
+    const lastTwo = n % 100;
+    if (lastTwo >= 21 && lastTwo <= 99) {
+      const t = Math.floor(lastTwo / 10);
+      const u = lastTwo % 10;
+      if (u !== 0 && t !== u) {
+        const swapped = (n - lastTwo) + u * 10 + t;
+        if (swapped >= 1 && swapped <= 200) candidates.push(build(swapped));
+      }
+    }
   }
 
   return candidates.filter(c => c.value !== n && c.value > 0);
@@ -103,11 +173,6 @@ function cardinalConfusers(target) {
 
 // ── Ordinal confusers ──────────────────────────────────────────────────────
 
-/**
- * Generate confuser candidates for ordinal numbers.
- * @param {object} target
- * @returns {object[]}
- */
 function ordinalConfusers(target) {
   const n = target.value;
   const candidates = [];
@@ -120,17 +185,14 @@ function ordinalConfusers(target) {
     category: 'ordinals',
   });
 
-  // Teen/ty swap: 13th <-> 30th
   if (n >= 13 && n <= 19) candidates.push(build((n % 10) * 10));
   if (n >= 20 && n <= 90 && n % 10 === 0) candidates.push(build((n / 10) + 10));
 
-  // Adjacent: ±1, ±2
   for (const d of [-1, 1, -2, 2, -10, 10]) {
     const v = n + d;
     if (v >= 1 && v <= 100) candidates.push(build(v));
   }
 
-  // Phonetic pairs: 5th/6th, 8th/18th
   if (n === 5) candidates.push(build(6));
   if (n === 6) candidates.push(build(5));
   if (n === 8) candidates.push(build(18));
@@ -141,26 +203,19 @@ function ordinalConfusers(target) {
 
 // ── Year confusers ─────────────────────────────────────────────────────────
 
-/**
- * Generate confuser candidates for years/decades.
- * @param {object} target
- * @returns {object[]}
- */
 function yearConfusers(target) {
   const candidates = [];
 
-  // Decade confusers
   if (target.value && target.value.isDecade) {
     const { decade, qualifier } = target.value;
     const qualifiers = ['early', 'mid', 'late'];
     const decades = [50, 60, 70, 80, 90];
 
-    // Same decade, different qualifier
     for (const q of qualifiers) {
       if (q !== qualifier) {
         candidates.push({
           value: { decade, qualifier: q, isDecade: true },
-          display: 'the ' + q + ' ' + decade + 's',
+          display: formatDecadeDisplay(decade, q),
           ttsText: decadeToWords(decade, q),
           lastDigit: Math.floor(decade / 10),
           category: 'years',
@@ -168,12 +223,11 @@ function yearConfusers(target) {
       }
     }
 
-    // Adjacent decades, same qualifier
     for (const d of decades) {
       if (d !== decade) {
         candidates.push({
           value: { decade: d, qualifier, isDecade: true },
-          display: 'the ' + qualifier + ' ' + d + 's',
+          display: formatDecadeDisplay(d, qualifier),
           ttsText: decadeToWords(d, qualifier),
           lastDigit: Math.floor(d / 10),
           category: 'years',
@@ -184,7 +238,6 @@ function yearConfusers(target) {
     return candidates;
   }
 
-  // Standard year confusers
   const year = target.value;
   const build = (y) => ({
     value: y,
@@ -194,13 +247,11 @@ function yearConfusers(target) {
     category: 'years',
   });
 
-  // ±1, ±10, ±100
   for (const d of [1, -1, 10, -10, 100, -100]) {
     const y = year + d;
     if (y >= 1100 && y <= 2100) candidates.push(build(y));
   }
 
-  // Teen/ty swap in last two digits
   const lo = year % 100;
   const base = year - lo;
   if (lo >= 13 && lo <= 19) {
@@ -217,11 +268,6 @@ function yearConfusers(target) {
 
 // ── Fraction confusers ─────────────────────────────────────────────────────
 
-/**
- * Generate confuser candidates for fractions.
- * @param {object} target
- * @returns {object[]}
- */
 function fractionConfusers(target) {
   const { whole, num, den } = target.value;
   const candidates = [];
@@ -238,17 +284,14 @@ function fractionConfusers(target) {
     };
   };
 
-  // Same denominator, different numerator
   for (let nn = 1; nn < den; nn++) {
     if (nn !== num) candidates.push(build(whole, nn, den));
   }
 
-  // Same numerator, different denominator
   for (const dd of [2, 3, 4, 5, 6, 8, 10]) {
     if (dd !== den && num < dd) candidates.push(build(whole, num, dd));
   }
 
-  // Mixed <-> simple
   if (whole > 0) {
     candidates.push(build(0, num, den));
     candidates.push(build(whole + 1, num, den));
@@ -257,7 +300,6 @@ function fractionConfusers(target) {
     candidates.push(build(1, num, den));
   }
 
-  // Half/quarter confusion
   if (den === 2) candidates.push(build(whole, 1, 4));
   if (den === 4 && num === 1) candidates.push(build(whole, 1, 2));
 
@@ -266,18 +308,13 @@ function fractionConfusers(target) {
 
 // ── Decimal confusers ──────────────────────────────────────────────────────
 
-/**
- * Generate confuser candidates for decimals.
- * @param {object} target
- * @returns {object[]}
- */
 function decimalConfusers(target) {
   const n = target.value;
   const candidates = [];
 
   const build = (v) => {
-    const display = v.toFixed(2);
-    const fracStr = display.split('.')[1];
+    const display = formatDecimalDisplay(v);
+    const fracStr = v.toFixed(2).split('.')[1];
     return {
       value: v,
       display,
@@ -287,7 +324,6 @@ function decimalConfusers(target) {
     };
   };
 
-  // Swap digits after decimal: 1.36 <-> 1.63
   const str = n.toFixed(2);
   const parts = str.split('.');
   const intPart = parseInt(parts[0], 10);
@@ -297,21 +333,14 @@ function decimalConfusers(target) {
     candidates.push(build(parseFloat(intPart + '.' + d2 + d1)));
   }
 
-  // Change whole part ±1
   for (const delta of [1, -1]) {
     const v = n + delta;
     if (v >= 0.01 && v <= 99.99) candidates.push(build(Math.round(v * 100) / 100));
   }
 
-  // Zero confusion: 0.02 <-> 0.20
-  if (d1 === '0' && d2 !== '0') {
-    candidates.push(build(parseFloat(intPart + '.' + d2 + '0')));
-  }
-  if (d2 === '0' && d1 !== '0') {
-    candidates.push(build(parseFloat(intPart + '.0' + d1)));
-  }
+  if (d1 === '0' && d2 !== '0') candidates.push(build(parseFloat(intPart + '.' + d2 + '0')));
+  if (d2 === '0' && d1 !== '0') candidates.push(build(parseFloat(intPart + '.0' + d1)));
 
-  // Magnitude shift: 1.36 <-> 13.6
   const shifted = n * 10;
   if (shifted <= 99.99) candidates.push(build(Math.round(shifted * 100) / 100));
   const shiftedDown = n / 10;
@@ -322,11 +351,6 @@ function decimalConfusers(target) {
 
 // ── Currency confusers ─────────────────────────────────────────────────────
 
-/**
- * Generate confuser candidates for currencies.
- * @param {object} target
- * @returns {object[]}
- */
 function currencyConfusers(target) {
   const amount = target.value;
   const totalCents = Math.round(amount * 100);
@@ -338,32 +362,28 @@ function currencyConfusers(target) {
     const tc = Math.round(v * 100);
     return {
       value: v,
-      display: '$' + v.toFixed(2),
+      display: formatCurrencyDisplay(v),
       ttsText: currencyToWords(v),
       lastDigit: tc % 10,
       category: 'currencies',
     };
   };
 
-  // Swap dollar/cent: $5.35 <-> $35.05
   if (cents > 0 && cents <= 999) {
     const swapped = cents + dollars / 100;
     if (swapped >= 0.01 && swapped <= 999.99) candidates.push(build(Math.round(swapped * 100) / 100));
   }
 
-  // Adjacent dollar amounts
   for (const d of [1, -1, 0.10, -0.10]) {
     const v = amount + d;
     if (v >= 0.01 && v <= 999.99) candidates.push(build(Math.round(v * 100) / 100));
   }
 
-  // Magnitude: $5.35 <-> $53.50
   const mag = amount * 10;
   if (mag <= 999.99) candidates.push(build(Math.round(mag * 100) / 100));
   const magDown = amount / 10;
   if (magDown >= 0.01) candidates.push(build(Math.round(magDown * 100) / 100));
 
-  // Zero confusion: $5.00 <-> $50.00
   if (cents === 0 && dollars > 0) {
     candidates.push(build(dollars * 10));
     if (dollars >= 10) candidates.push(build(dollars / 10));
@@ -374,18 +394,13 @@ function currencyConfusers(target) {
 
 // ── Percentage confusers ───────────────────────────────────────────────────
 
-/**
- * Generate confuser candidates for percentages.
- * @param {object} target
- * @returns {object[]}
- */
 function percentageConfusers(target) {
   const n = target.value;
   const candidates = [];
 
   const build = (v) => {
     const isWhole = Number.isInteger(v);
-    const display = isWhole ? v + '%' : v.toFixed(2).replace(/0+$/, '').replace(/\.$/, '') + '%';
+    const display = formatPercentageDisplay(v, isWhole);
     let lastDig;
     if (isWhole) {
       lastDig = v % 10;
@@ -402,7 +417,6 @@ function percentageConfusers(target) {
     };
   };
 
-  // Digit swap for decimals
   if (!Number.isInteger(n)) {
     const str = n.toFixed(2);
     const parts = str.split('.');
@@ -413,7 +427,6 @@ function percentageConfusers(target) {
     }
   }
 
-  // Whole vs decimal: 8% <-> 0.8% <-> 80%
   if (Number.isInteger(n)) {
     if (n <= 99) candidates.push(build(n / 10));
     if (n <= 10) candidates.push(build(n * 10));
@@ -422,7 +435,6 @@ function percentageConfusers(target) {
     candidates.push(build(n * 10 <= 100 ? n * 10 : n / 10));
   }
 
-  // Adjacent
   for (const d of [1, -1, 5, -5]) {
     const v = n + d;
     if (v > 0 && v <= 100) candidates.push(build(Math.round(v * 100) / 100));
@@ -433,15 +445,10 @@ function percentageConfusers(target) {
 
 // ── Room/Bus confusers ─────────────────────────────────────────────────────
 
-/**
- * Generate confuser candidates for room/bus numbers.
- * @param {object} target
- * @returns {object[]}
- */
 function roomBusConfusers(target) {
   const { type, number } = target.value;
   const candidates = [];
-  const label = type === 'room' ? 'Room' : 'Bus';
+  const label = roomLabel(type);
 
   const build = (num) => ({
     value: { type, number: num },
@@ -456,22 +463,17 @@ function roomBusConfusers(target) {
   const t = Math.floor(remainder / 10);
   const u = remainder % 10;
 
-  // Zero position swap: Room 101 <-> Room 110
   if (t === 0 && u > 0) candidates.push(build(h * 100 + u * 10));
   if (u === 0 && t > 0) candidates.push(build(h * 100 + t));
 
-  // Adjacent
   for (const d of [1, -1]) {
     const v = number + d;
     if (v >= 100 && v <= 999) candidates.push(build(v));
   }
 
-  // Digit swap: Room 305 <-> Room 503
   if (h !== u) candidates.push(build(u * 100 + t * 10 + h));
-  // Room 305 <-> Room 350
   if (t !== u) candidates.push(build(h * 100 + u * 10 + t));
 
-  // Different hundreds
   for (const d of [100, -100]) {
     const v = number + d;
     if (v >= 100 && v <= 999) candidates.push(build(v));
@@ -482,11 +484,6 @@ function roomBusConfusers(target) {
 
 // ── Sports confusers ───────────────────────────────────────────────────────
 
-/**
- * Generate confuser candidates for sports scores.
- * @param {object} target
- * @returns {object[]}
- */
 function sportsConfusers(target) {
   const { home, away } = target.value;
   const candidates = [];
@@ -499,10 +496,8 @@ function sportsConfusers(target) {
     category: 'sports',
   });
 
-  // Swap sides: 5:0 <-> 0:5
   if (home !== away) candidates.push(build(away, home));
 
-  // Adjacent scores
   for (const d of [1, -1]) {
     const h = home + d;
     const a = away + d;
@@ -510,11 +505,9 @@ function sportsConfusers(target) {
     if (a >= 0 && a <= 5) candidates.push(build(home, a));
   }
 
-  // Same total but different distribution
   candidates.push(build(home + 1, away > 0 ? away - 1 : away));
   candidates.push(build(home > 0 ? home - 1 : home, away + 1));
 
-  // Common scores to ensure enough candidates for edge cases (e.g. 0:0)
   const commonScores = [[1,0],[0,1],[1,1],[2,0],[0,2],[2,1],[1,2],[3,0],[0,3],[2,2],[3,1]];
   for (const [h, a] of commonScores) {
     candidates.push(build(h, a));
@@ -529,11 +522,6 @@ function sportsConfusers(target) {
 
 // ── Temperature confusers ──────────────────────────────────────────────────
 
-/**
- * Generate confuser candidates for temperatures.
- * @param {object} target
- * @returns {object[]}
- */
 function temperatureConfusers(target) {
   const temp = target.value;
   const candidates = [];
@@ -546,16 +534,13 @@ function temperatureConfusers(target) {
     category: 'temperatures',
   });
 
-  // Sign flip: -10 <-> +10
   candidates.push(build(-temp));
 
-  // Adjacent
   for (const d of [1, -1, 5, -5, 10, -10]) {
     const v = temp + d;
     if (v >= -30 && v <= 45) candidates.push(build(v));
   }
 
-  // Teen/ty swap
   const absTemp = Math.abs(temp);
   const sign = temp < 0 ? -1 : 1;
   if (absTemp >= 13 && absTemp <= 19) {
@@ -572,52 +557,36 @@ function temperatureConfusers(target) {
 
 // ── Large number confusers ─────────────────────────────────────────────────
 
-/**
- * Generate confuser candidates for large numbers.
- * @param {object} target
- * @returns {object[]}
- */
 function largeConfusers(target) {
   const n = target.value;
   const candidates = [];
 
   const build = (v) => ({
     value: v,
-    display: v.toLocaleString('en-US').replace(/,/g, '\u2009'),
+    display: formatLargeDisplay(v),
     ttsText: largeNumberToWords(v),
     lastDigit: v % 10,
     category: 'large',
   });
 
-  // Magnitude shift
   candidates.push(build(n * 10));
   if (n >= 10) candidates.push(build(Math.floor(n / 10)));
 
-  // ±100, ±1000, ±10000
   for (const d of [100, -100, 1000, -1000, 10000, -10000]) {
     const v = n + d;
     if (v >= 100 && v <= 9999999) candidates.push(build(v));
   }
 
-  // Teen/ty in last two digits
   const lo = n % 100;
   const base = n - lo;
-  if (lo >= 13 && lo <= 19) {
-    candidates.push(build(base + (lo % 10) * 10));
-  }
-  if (lo >= 20 && lo <= 90 && lo % 10 === 0) {
-    candidates.push(build(base + (lo / 10) + 10));
-  }
+  if (lo >= 13 && lo <= 19) candidates.push(build(base + (lo % 10) * 10));
+  if (lo >= 20 && lo <= 90 && lo % 10 === 0) candidates.push(build(base + (lo / 10) + 10));
 
   return candidates.filter(c => c.display !== target.display && c.value >= 100 && c.value <= 9999999);
 }
 
 // ── Confuser strategy router ───────────────────────────────────────────────
 
-/**
- * Map of category to confuser function.
- * @type {Object<string, function>}
- */
 const CONFUSER_FN = {
   cardinals: cardinalConfusers,
   ordinals: ordinalConfusers,
@@ -634,14 +603,6 @@ const CONFUSER_FN = {
 
 // ── Last-digit constraint enforcement ──────────────────────────────────────
 
-/**
- * Enforce at least 2 of 4 options share the target's last digit.
- * If not met naturally, modify the last confuser.
- * @param {object} target
- * @param {object[]} confusers
- * @param {function} confuserFn - The category confuser generator
- * @returns {object[]}
- */
 function enforceLastDigitConstraint(target, confusers, confuserFn) {
   const all = [target, ...confusers];
   const targetLD = target.lastDigit;
@@ -649,15 +610,12 @@ function enforceLastDigitConstraint(target, confusers, confuserFn) {
 
   if (sameLD >= 2) return confusers;
 
-  // Need at least one more with matching last digit
-  // Try all candidates from confuser function
   const allCandidates = confuserFn(target);
   const matchingLD = allCandidates.filter(c =>
     c.lastDigit === targetLD && isUnique(c, all)
   );
 
   if (matchingLD.length > 0) {
-    // Replace the last confuser
     confusers[confusers.length - 1] = matchingLD[0];
   }
 
@@ -668,16 +626,14 @@ function enforceLastDigitConstraint(target, confusers, confuserFn) {
 
 /**
  * Generate exactly 3 confusers for a given target CategoryValue.
- * Applies category-specific generation + last-digit constraint.
- * @param {object} target - The target CategoryValue
- * @returns {object[]} Array of exactly 3 CategoryValue confusers
+ * @param {object} target
+ * @returns {object[]}
  */
 export function generateConfusers(target) {
   const cat = target.mixedCategory || target.category;
   const confuserFn = CONFUSER_FN[cat] || cardinalConfusers;
   const allCandidates = confuserFn(target);
 
-  // Deduplicate by display string and exclude target
   const seen = new Set([target.display]);
   const unique = [];
   for (const c of allCandidates) {
@@ -687,17 +643,14 @@ export function generateConfusers(target) {
     }
   }
 
-  // Take top 3
   const result = unique.slice(0, 3);
 
-  // Fallback: if we have fewer than 3, generate generic nearby values
   while (result.length < 3) {
     const fallback = generateFallback(target, [...result, target]);
     if (fallback && !seen.has(fallback.display)) {
       seen.add(fallback.display);
       result.push(fallback);
     } else {
-      // Emergency fallback: just create a dummy value
       const emergency = createEmergencyFallback(target, seen);
       if (emergency) {
         seen.add(emergency.display);
@@ -708,7 +661,6 @@ export function generateConfusers(target) {
     }
   }
 
-  // Enforce last-digit constraint
   if (result.length === 3) {
     return enforceLastDigitConstraint(target, result, confuserFn);
   }
@@ -717,7 +669,7 @@ export function generateConfusers(target) {
 }
 
 /**
- * Generate a generic fallback confuser for any category.
+ * Generate a generic fallback confuser.
  * @param {object} target
  * @param {object[]} existing
  * @returns {object|null}
@@ -725,7 +677,6 @@ export function generateConfusers(target) {
 function generateFallback(target, existing) {
   const cat = target.mixedCategory || target.category;
 
-  // For numeric categories, try simple deltas
   if (typeof target.value === 'number') {
     for (const d of [1, -1, 2, -2, 5, -5, 10, -10]) {
       const v = target.value + d;
@@ -741,12 +692,12 @@ function generateFallback(target, existing) {
           candidate = { value: v, display: v + '°C', ttsText: temperatureToWords(v), lastDigit: Math.abs(v) % 10, category: cat };
           break;
         case 'large':
-          candidate = { value: v, display: v.toLocaleString('en-US').replace(/,/g, '\u2009'), ttsText: largeNumberToWords(v), lastDigit: v % 10, category: cat };
+          candidate = { value: v, display: formatLargeDisplay(v), ttsText: largeNumberToWords(v), lastDigit: v % 10, category: cat };
           break;
         case 'decimals': {
           if (v <= 0 || v > 99.99) continue;
-          const display = v.toFixed(2);
-          const fracStr = display.split('.')[1];
+          const display = formatDecimalDisplay(v);
+          const fracStr = v.toFixed(2).split('.')[1];
           candidate = { value: v, display, ttsText: decimalToWords(v), lastDigit: parseInt(fracStr[fracStr.length - 1], 10), category: cat };
           break;
         }
@@ -763,7 +714,6 @@ function generateFallback(target, existing) {
 
 /**
  * Create an emergency fallback (last resort).
- * Category-aware: generates values matching the target's category type.
  * @param {object} target
  * @param {Set<string>} seenDisplays
  * @returns {object|null}
@@ -804,7 +754,7 @@ function createEmergencyFallback(target, seenDisplays) {
       }
       case 'currencies': {
         const v = randInt(1, 99900) / 100;
-        const display = '$' + v.toFixed(2);
+        const display = formatCurrencyDisplay(v);
         if (!seenDisplays.has(display)) {
           const tc = Math.round(v * 100);
           candidate = { value: v, display, ttsText: currencyToWords(v), lastDigit: tc % 10, category: 'currencies' };
@@ -822,7 +772,7 @@ function createEmergencyFallback(target, seenDisplays) {
       case 'roomBus': {
         const type = target.value && target.value.type ? target.value.type : 'room';
         const num = randInt(100, 999);
-        const label = type === 'room' ? 'Room' : 'Bus';
+        const label = roomLabel(type);
         const display = label + ' ' + num;
         if (!seenDisplays.has(display)) {
           candidate = { value: { type, number: num }, display, ttsText: roomBusToWords(type, num), lastDigit: num % 10, category: 'roomBus' };
@@ -847,15 +797,14 @@ function createEmergencyFallback(target, seenDisplays) {
       }
       case 'decimals': {
         const v = randInt(1, 9999) / 100;
-        const display = v.toFixed(2);
+        const display = formatDecimalDisplay(v);
         if (!seenDisplays.has(display)) {
-          const fracStr = display.split('.')[1];
+          const fracStr = v.toFixed(2).split('.')[1];
           candidate = { value: v, display, ttsText: decimalToWords(v), lastDigit: parseInt(fracStr[fracStr.length - 1], 10), category: 'decimals' };
         }
         break;
       }
       default: {
-        // Cardinals, large, and any unknown category — generate cardinal numbers
         const v = randInt(1, 100);
         const display = String(v);
         if (!seenDisplays.has(display)) {
