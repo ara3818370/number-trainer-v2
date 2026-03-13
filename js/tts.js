@@ -1,4 +1,7 @@
 // tts.js — Web Speech API wrapper with iOS workarounds, offline detection, error handling
+// Phase 2b: Multi-language voice selection (English + German)
+
+import { getLearnLang } from './i18n.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -14,20 +17,25 @@ const RATE_MAP = {
 
 // ── State ──────────────────────────────────────────────────────────────────
 
-let selectedVoice = null;
+/** @type {SpeechSynthesisVoice|null} */
+let selectedEnVoice = null;
+/** @type {SpeechSynthesisVoice|null} */
+let selectedDeVoice = null;
 let available = false;
 let initialized = false;
 let onInterruptCallback = null;
 let noEnglishVoiceWarning = false;
+let noGermanVoiceWarning = false;
 
-// ── Voice selection (TD-008) ───────────────────────────────────────────────
+// ── Voice selection ────────────────────────────────────────────────────────
 
 /**
  * Select the best English voice from a list.
  * Priority: Samantha/Daniel → en-US → en-* → null (with warning).
- * BUG-002: No longer silently falls back to non-English voice.
+ * @param {SpeechSynthesisVoice[]} voices
+ * @returns {SpeechSynthesisVoice|null}
  */
-function selectBestVoice(voices) {
+function selectBestEnglishVoice(voices) {
   if (!voices || voices.length === 0) return null;
 
   const preferred = voices.find(v =>
@@ -41,16 +49,47 @@ function selectBestVoice(voices) {
   const enAny = voices.find(v => v.lang.startsWith('en'));
   if (enAny) { noEnglishVoiceWarning = false; return enAny; }
 
-  // BUG-002: Do NOT silently fall back to a non-English voice.
-  // Set warning flag so init() can notify the UI.
   noEnglishVoiceWarning = true;
   return null;
+}
+
+/**
+ * Select the best German voice from a list.
+ * Priority: native German voices (Anna/Helena/Petra) → de-DE → de-* → null.
+ * @param {SpeechSynthesisVoice[]} voices
+ * @returns {SpeechSynthesisVoice|null}
+ */
+function selectBestGermanVoice(voices) {
+  if (!voices || voices.length === 0) return null;
+
+  // Prefer well-known native German voices
+  const preferred = voices.find(v =>
+    /anna|helena|petra|markus|yannick/i.test(v.name) && v.lang.startsWith('de')
+  );
+  if (preferred) { noGermanVoiceWarning = false; return preferred; }
+
+  const deDE = voices.find(v => v.lang === 'de-DE');
+  if (deDE) { noGermanVoiceWarning = false; return deDE; }
+
+  const deAny = voices.find(v => v.lang.startsWith('de'));
+  if (deAny) { noGermanVoiceWarning = false; return deAny; }
+
+  noGermanVoiceWarning = true;
+  return null;
+}
+
+/**
+ * Get the currently active voice based on learning language.
+ * @returns {SpeechSynthesisVoice|null}
+ */
+function getActiveVoice() {
+  return getLearnLang() === 'de' ? selectedDeVoice : selectedEnVoice;
 }
 
 // ── Initialization ─────────────────────────────────────────────────────────
 
 /**
- * Initialize TTS: wait for voices, select best English voice.
+ * Initialize TTS: wait for voices, select best voices for all languages.
  * Must be called once at startup. Returns true if TTS is usable.
  * @returns {Promise<boolean>}
  */
@@ -63,26 +102,32 @@ export function init() {
       return;
     }
 
-    // Try getting voices immediately
+    /**
+     * Process available voices and select best for each language.
+     * @param {SpeechSynthesisVoice[]} voices
+     */
+    function processVoices(voices) {
+      selectedEnVoice = selectBestEnglishVoice(voices);
+      selectedDeVoice = selectBestGermanVoice(voices);
+      // Available if at least one language voice exists
+      available = !!(selectedEnVoice || selectedDeVoice);
+      initialized = true;
+    }
+
     let voices = speechSynthesis.getVoices();
     if (voices.length > 0) {
-      selectedVoice = selectBestVoice(voices);
-      available = !!selectedVoice;
-      initialized = true;
+      processVoices(voices);
       resolve(available);
       return;
     }
 
-    // Wait for voiceschanged event (async on most browsers)
     let resolved = false;
 
     const onVoicesChanged = () => {
       if (resolved) return;
       voices = speechSynthesis.getVoices();
       if (voices.length > 0) {
-        selectedVoice = selectBestVoice(voices);
-        available = !!selectedVoice;
-        initialized = true;
+        processVoices(voices);
         resolved = true;
         resolve(available);
       }
@@ -90,7 +135,6 @@ export function init() {
 
     speechSynthesis.addEventListener('voiceschanged', onVoicesChanged);
 
-    // Fallback: poll for voices if event doesn't fire (iOS quirk)
     let pollElapsed = 0;
     const pollTimer = setInterval(() => {
       pollElapsed += VOICE_POLL_INTERVAL_MS;
@@ -101,24 +145,18 @@ export function init() {
       }
       if (pollElapsed >= VOICE_POLL_MAX_MS && !resolved) {
         clearInterval(pollTimer);
-        // Last attempt
         voices = speechSynthesis.getVoices();
-        selectedVoice = selectBestVoice(voices);
-        available = !!selectedVoice;
-        initialized = true;
+        processVoices(voices);
         resolved = true;
         resolve(available);
       }
     }, VOICE_POLL_INTERVAL_MS);
 
-    // Hard timeout
     setTimeout(() => {
       if (!resolved) {
         clearInterval(pollTimer);
         voices = speechSynthesis.getVoices();
-        selectedVoice = selectBestVoice(voices);
-        available = !!selectedVoice;
-        initialized = true;
+        processVoices(voices);
         resolved = true;
         resolve(available);
       }
@@ -130,36 +168,34 @@ export function init() {
 
 /**
  * Speak the given text using Web Speech API.
- * @param {string} text - Text to speak (in English)
+ * Uses the voice appropriate for the current learning language.
+ * @param {string} text - Text to speak
  * @param {'slow'|'normal'|'fast'} speed - Speed preset name
  * @returns {Promise<void>} Resolves when speech ends, rejects on error
  */
 export function speak(text, speed = 'normal') {
   return new Promise((resolve, reject) => {
-    if (!available || !selectedVoice) {
+    const voice = getActiveVoice();
+    if (!available || !voice) {
       reject(new Error('TTS not available'));
       return;
     }
 
-    // Cancel any ongoing speech (TR-6 workaround)
     speechSynthesis.cancel();
 
-    // Small delay after cancel for iOS stability
     setTimeout(() => {
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.voice = selectedVoice;
-      utterance.lang = selectedVoice.lang || 'en-US';
+      utterance.voice = voice;
+      utterance.lang = voice.lang || (getLearnLang() === 'de' ? 'de-DE' : 'en-US');
       utterance.rate = RATE_MAP[speed] || 1.0;
       utterance.pitch = 1.0;
 
       utterance.onend = () => resolve();
 
       utterance.onerror = (event) => {
-        // Distinguish offline vs generic TTS error (ISSUE-005)
         if (!navigator.onLine) {
           reject(new Error('offline'));
         } else if (event.error === 'canceled') {
-          // Canceled is not a real error (user triggered cancel)
           resolve();
         } else {
           reject(new Error('tts_error'));
@@ -174,16 +210,16 @@ export function speak(text, speed = 'normal') {
 // ── Warm-up (UX-002) ───────────────────────────────────────────────────────
 
 /**
- * Silent warm-up for iOS: triggers speech in a user gesture handler
- * without producing audible sound. Uses volume=0 with a single space.
+ * Silent warm-up for iOS: triggers speech in a user gesture handler.
  */
 export function warmUp() {
   if (!window.speechSynthesis) return;
   const utterance = new SpeechSynthesisUtterance(' ');
   utterance.volume = 0;
-  if (selectedVoice) {
-    utterance.voice = selectedVoice;
-    utterance.lang = selectedVoice.lang || 'en-US';
+  const voice = getActiveVoice();
+  if (voice) {
+    utterance.voice = voice;
+    utterance.lang = voice.lang || 'en-US';
   }
   speechSynthesis.speak(utterance);
 }
@@ -203,36 +239,55 @@ export function stop() {
 
 /**
  * Check if TTS is available and initialized.
+ * @returns {boolean}
  */
 export function isAvailable() {
   return available;
 }
 
 /**
- * Get the name of the selected voice (for diagnostics).
+ * Get the name of the selected voice for the current learn language.
+ * @returns {string}
  */
 export function getVoiceName() {
-  return selectedVoice ? `${selectedVoice.name} (${selectedVoice.lang})` : 'none';
+  const voice = getActiveVoice();
+  return voice ? `${voice.name} (${voice.lang})` : 'none';
 }
 
 /**
- * Check if no English voice was found (BUG-002).
- * When true, the UI should warn the user.
+ * Check if no English voice was found.
+ * @returns {boolean}
  */
 export function hasNoEnglishVoice() {
   return noEnglishVoiceWarning;
 }
 
-// ── Visibility change handler (EC-3) ───────────────────────────────────────
+/**
+ * Check if no German voice was found.
+ * @returns {boolean}
+ */
+export function hasNoGermanVoice() {
+  return noGermanVoiceWarning;
+}
+
+/**
+ * Check if the current learning language has a voice available.
+ * @returns {boolean}
+ */
+export function hasVoiceForLearnLang() {
+  return !!getActiveVoice();
+}
+
+// ── Visibility change handler ──────────────────────────────────────────────
 
 /**
  * Set a callback for when TTS may have been interrupted by tab switch.
+ * @param {function} callback
  */
 export function onInterrupt(callback) {
   onInterruptCallback = callback;
 }
 
-// Handle visibility changes — cancel TTS when tab goes hidden
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
@@ -243,7 +298,6 @@ if (typeof document !== 'undefined') {
   });
 }
 
-// Cancel TTS on page unload (EC-2)
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', () => stop());
 }
