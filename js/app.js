@@ -1,11 +1,15 @@
 // app.js — Orchestrator: navigation, lifecycle, event wiring
-// v2: 12 categories, dark theme toggle, CategoryValue interface
+// Phase 2b: i18n framework, UI + learning language switchers
 
 import * as tts from './tts.js';
 import * as game from './game.js';
 import * as ui from './ui.js';
 import * as storage from './storage.js';
 import { CATEGORY_GROUPS, CATEGORY_META } from './categories.js';
+import {
+  initI18n, t, applyTranslations, getUILang, setUILang,
+  getLearnLang, setLearnLang, getCategoryLabel, getCategoryDesc, getGroupLabel,
+} from './i18n.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -18,33 +22,36 @@ let currentSpeed = 'normal';
 let lastMode = null;
 let ttsReady = false;
 let currentTheme = 'auto';
-let sessionLength = 10; // 0 = infinite
+let sessionLength = 10;
 
 // ── Initialization ─────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Initialize i18n FIRST (before any UI rendering)
+  initI18n();
+
   ui.initScreens();
 
   // Load saved preferences
   currentSpeed = storage.get('speed', 'normal');
   ui.setActiveSpeed(currentSpeed);
 
-  // Initialize theme
   currentTheme = storage.get('theme', 'auto');
   applyTheme(currentTheme);
 
-  // Load session length
   sessionLength = storage.get('sessionLength', 10);
   ui.setActiveSessionLength(sessionLength);
 
   // Initialize TTS
   ttsReady = await tts.init();
 
-  if (!ttsReady && tts.hasNoEnglishVoice()) {
-    ui.showError(
-      'Не знайдено англійського голосу на вашому пристрої. ' +
-      'Перевірте налаштування мов або встановіть English голосовий пакет.'
-    );
+  if (!ttsReady && !tts.hasVoiceForLearnLang()) {
+    const learnLang = getLearnLang();
+    if (learnLang === 'de' && tts.hasNoGermanVoice()) {
+      ui.showError(t('toast.no_voice_de'));
+    } else if (tts.hasNoEnglishVoice()) {
+      ui.showError(t('toast.no_voice_en'));
+    }
   }
 
   tts.onInterrupt(() => {});
@@ -62,6 +69,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   wireSessionLength();
   wireBackButton();
   wireError();
+  wireLanguageSwitchers();
+
+  // Apply i18n translations to static elements
+  applyTranslations();
 
   // Decide which screen to show
   const onboarded = storage.get('onboarded', false);
@@ -99,7 +110,6 @@ function applyTheme(theme) {
   storage.set('theme', theme);
   ui.updateThemeIcon(theme);
 
-  // Update meta theme-color
   const isDark = theme === 'dark' ||
     (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const color = isDark ? '#1c1c1e' : '#f5f5f7';
@@ -111,15 +121,13 @@ function applyTheme(theme) {
 /**
  * Wire the theme toggle button.
  */
-const THEME_LABELS = { auto: 'Тема: авто', light: 'Тема: світла', dark: 'Тема: темна' };
-
 function wireThemeToggle() {
   const btn = document.getElementById('btn-theme');
   if (btn) {
     btn.addEventListener('click', () => {
       currentTheme = ui.nextTheme(currentTheme);
       applyTheme(currentTheme);
-      ui.showToast(THEME_LABELS[currentTheme] || currentTheme);
+      ui.showToast(t('theme.' + currentTheme));
     });
   }
 }
@@ -151,10 +159,66 @@ function wireBackButton() {
   }
 }
 
+// ── Language Switchers ─────────────────────────────────────────────────────
+
+/**
+ * Wire UI language and learning language switcher buttons.
+ */
+function wireLanguageSwitchers() {
+  // UI language buttons
+  document.querySelectorAll('.ui-lang-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const newLang = btn.dataset.lang;
+      setUILang(newLang);
+      updateLangButtonStates();
+      // Re-render category menu with new language
+      renderCategoryGroups();
+    });
+  });
+
+  // Learning language buttons
+  document.querySelectorAll('.learn-lang-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const newLang = btn.dataset.lang;
+      setLearnLang(newLang);
+      updateLangButtonStates();
+
+      // Check voice availability for new learning language
+      if (!tts.hasVoiceForLearnLang()) {
+        if (newLang === 'de') {
+          ui.showToast(t('toast.no_voice_de'));
+        } else {
+          ui.showToast(t('toast.no_voice_en'));
+        }
+      }
+    });
+  });
+
+  // Set initial button states
+  updateLangButtonStates();
+}
+
+/**
+ * Update active states on all language switcher buttons.
+ */
+function updateLangButtonStates() {
+  const uiLang = getUILang();
+  const learnLang = getLearnLang();
+
+  document.querySelectorAll('.ui-lang-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.lang === uiLang);
+  });
+
+  document.querySelectorAll('.learn-lang-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.lang === learnLang);
+  });
+}
+
 // ── Category group rendering ───────────────────────────────────────────────
 
 /**
  * Build the grouped category menu dynamically.
+ * Uses i18n for group labels, category names, and descriptions.
  */
 function renderCategoryGroups() {
   const container = document.getElementById('category-groups');
@@ -167,7 +231,7 @@ function renderCategoryGroups() {
 
     const label = document.createElement('div');
     label.className = 'category-group-label';
-    label.textContent = group.label;
+    label.textContent = getGroupLabel(group.id);
     groupEl.appendChild(label);
 
     const grid = document.createElement('div');
@@ -184,14 +248,11 @@ function renderCategoryGroups() {
       btn.className = 'mode-btn';
       btn.dataset.mode = catId;
       btn.innerHTML = `<span class="mode-icon" aria-hidden="true">${meta.icon}</span>` +
-        `<span>${meta.label}</span><br><small>${meta.desc}</small>`;
+        `<span>${getCategoryLabel(catId)}</span><br><small>${getCategoryDesc(catId)}</small>`;
 
       btn.addEventListener('click', () => {
-        if (!ttsReady) {
-          ui.showError(
-            'Ваш браузер не підтримує озвучення. ' +
-            'Рекомендуємо Safari на iPhone або Chrome на Android.'
-          );
+        if (!ttsReady && !tts.hasVoiceForLearnLang()) {
+          ui.showError(t('error.message'));
           return;
         }
         startTraining(catId);
@@ -224,7 +285,7 @@ function wireOnboarding() {
 // ── Menu ───────────────────────────────────────────────────────────────────
 
 /**
- * Wire the menu screen (help button only — category buttons are wired in renderCategoryGroups).
+ * Wire the menu screen.
  */
 function wireMenu() {
   const btnHelp = document.getElementById('btn-help');
@@ -273,7 +334,6 @@ function handleAnswer(selectedDisplay, buttonIndex) {
   const score = game.getScore();
   ui.updateScore(score.correct, score.total);
 
-  // Auto-end if session length reached
   if (sessionLength > 0 && score.total >= sessionLength) {
     ui.showCorrect(result.correctIndex);
     if (!result.isCorrect) ui.showWrong(buttonIndex, result.correctIndex);
@@ -307,7 +367,7 @@ function speakCurrent() {
     if (err.message === 'offline') {
       ui.showOfflineWarning();
     } else if (err.message === 'tts_error') {
-      ui.showToast('Озвучення не вдалося. Спробуйте ще раз.');
+      ui.showToast(t('toast.tts_failed'));
     }
   });
 }
@@ -400,12 +460,10 @@ function wireError() {
   if (btnRetry) {
     btnRetry.addEventListener('click', async () => {
       ttsReady = await tts.init();
-      if (ttsReady) {
+      if (ttsReady && tts.hasVoiceForLearnLang()) {
         ui.showScreen('menu');
       } else {
-        ui.showError(
-          'Озвучення все ще недоступне. Перезавантажте сторінку або перевірте налаштування мов пристрою.'
-        );
+        ui.showError(t('toast.tts_still_unavailable'));
       }
     });
   }
