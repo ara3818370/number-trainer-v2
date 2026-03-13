@@ -1,7 +1,8 @@
 // ui.js — DOM manipulation, screen navigation, button rendering, feedback
-// v2: Updated for CategoryValue interface and 12-category grouped layout
+// Phase 2b: All text uses i18n, category metadata via translation keys
 
 import { CATEGORY_GROUPS, CATEGORY_META } from './categories.js';
+import { t, getCategoryLabel, getCategoryDesc, getGroupLabel } from './i18n.js';
 
 // ── Screen management ──────────────────────────────────────────────────────
 
@@ -40,7 +41,7 @@ export function showCategoryIndicator(mode) {
   if (!el) return;
   const meta = CATEGORY_META[mode];
   if (meta) {
-    el.textContent = meta.icon + ' ' + meta.label;
+    el.textContent = meta.icon + ' ' + getCategoryLabel(mode);
   } else {
     el.textContent = '';
   }
@@ -58,7 +59,7 @@ export function setActiveSessionLength(length) {
   });
 }
 
-// ── Options rendering (v2: uses CategoryValue.display) ─────────────────────
+// ── Options rendering ──────────────────────────────────────────────────────
 
 let buttonsLocked = false;
 
@@ -124,7 +125,7 @@ export function showCorrect(correctIndex) {
 }
 
 /**
- * Show wrong answer feedback: red on selected, green on correct.
+ * Show wrong answer feedback.
  * @param {number} selectedIndex
  * @param {number} correctIndex
  */
@@ -174,18 +175,17 @@ export function showSummary(stats) {
   document.getElementById('summary-percent').textContent = stats.percent + '%';
 
   const meta = CATEGORY_META[stats.mode];
-  document.getElementById('summary-mode').textContent = meta ? meta.label : stats.mode;
+  const label = meta ? getCategoryLabel(stats.mode) : stats.mode;
+  document.getElementById('summary-mode').textContent = label;
 
-  // Show category icon + label at top of summary
   const catEl = document.getElementById('summary-category');
   if (catEl && meta) {
-    catEl.textContent = meta.icon + ' ' + meta.label;
+    catEl.textContent = meta.icon + ' ' + label;
   }
 
-  // Update "Нова сесія" to show category
   const btnNew = document.getElementById('btn-new-session');
   if (btnNew && meta) {
-    btnNew.textContent = '🔄 Ще раз: ' + meta.label;
+    btnNew.textContent = t('summary.again') + ' ' + label;
   }
 
   showScreen('summary');
@@ -224,13 +224,13 @@ export function showToast(message) {
  * Show offline warning for TTS.
  */
 export function showOfflineWarning() {
-  showToast('Потрібне з\'єднання для озвучення. Перевірте інтернет і спробуйте знову.');
+  showToast(t('toast.offline'));
 }
 
 // ── Next button visibility ─────────────────────────────────────────────────
 
 /**
- * Show or hide the "Далі" (Next) button.
+ * Show or hide the Next button.
  * @param {boolean} visible
  */
 export function showNextButton(visible) {
@@ -239,7 +239,7 @@ export function showNextButton(visible) {
 }
 
 /**
- * Show or hide the "Пропустити" (Skip) button.
+ * Show or hide the Skip button.
  * @param {boolean} visible
  */
 export function showSkipButton(visible) {
@@ -266,7 +266,7 @@ const THEME_CYCLE = ['auto', 'light', 'dark'];
 
 /**
  * Update the theme toggle button icon.
- * @param {string} theme - 'auto' | 'light' | 'dark'
+ * @param {string} theme
  */
 export function updateThemeIcon(theme) {
   const btn = document.getElementById('btn-theme');
